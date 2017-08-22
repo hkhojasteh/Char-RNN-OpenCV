@@ -17,6 +17,11 @@ using namespace cv::ml;
 
 typedef tuple<char, uint32_t> enumerate;
 
+void sample(Mat1d, uint32_t, uint32_t);
+
+uint32_t data_size, vocab_size;
+Mat1d Wxh, Whh, Why, bh, by;							//model parameters
+
 int main() {
 	vector<char> data;
 	vector<char> chars;
@@ -39,8 +44,8 @@ int main() {
 		}
 	}
 
-	uint32_t data_size = data.size();
-	uint32_t vocab_size = chars.size();
+	data_size = data.size();
+	vocab_size = chars.size();
 	printf("data has %d characters, %d unique.\n", data_size, vocab_size);
 	vector<enumerate> char_to_ix = charenum;
 	reverse(charenum.begin(), charenum.end());
@@ -51,17 +56,16 @@ int main() {
 	uint32_t seq_length = 25;							//number of steps to unroll the RNN for
 	double learning_rate = 1e-1;
 
-	//model parameters
-	Mat1d Wxh(hidden_size, vocab_size);					//Or: Mat mat(2, 4, CV_64FC1);
-	Mat1d Whh(hidden_size, vocab_size);
-	Mat1d Why(hidden_size, vocab_size);
+	Wxh.create(hidden_size, vocab_size);				//Or: Mat mat(2, 4, CV_64FC1);
+	Whh.create(hidden_size, hidden_size);
+	Why.create(vocab_size, hidden_size);
 	double mean = 0.0, stddev = 1.0 / 3.0;				//99.7% of values will be inside [-1, +1] interval
 
 	randn(Wxh, Scalar(mean), Scalar(stddev));			//input to hidden
 	randn(Whh, Scalar(mean), Scalar(stddev));			//hidden to hidden
 	randn(Why, Scalar(mean), Scalar(stddev));			//hidden to output
-	Mat1d bh = Mat::zeros(1, hidden_size, CV_32F);		//hidden bias
-	Mat1d by = Mat::zeros(1, vocab_size, CV_32F);		//output bias
+	bh = Mat::zeros(hidden_size, 1, CV_32F);			//hidden bias
+	by = Mat::zeros(vocab_size, 1, CV_32F);				//output bias
 
 	uint32_t n, p = 0;
 	//Make an array of zeros with the same shape and type as a Ws array.
@@ -75,17 +79,38 @@ int main() {
 
 	Mat1d loss, dWxh, dWhh, dWhy, dbh, dby, hprev;
 	vector<enumerate> inputs, targets;
-	for (int i = 0; i < 100; i++) {
+	for (uint32_t i = 0; i < 100; i++) {
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
 		if (p + seq_length + 1 >= data.size() || n == 0) {
 			hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
 			p = 0;										//go from start of data
 		}
 
-		for (int i = 0; i < seq_length; i++) {
+		for (uint32_t i = 0; i < seq_length; i++) {
+			inputs.clear();
+			targets.clear();
 			inputs.push_back(char_to_ix[p + i]);
 			targets.push_back(char_to_ix[p + 1 + i]);
 		}
+
+		//Sample from the model now and then
+		//if (n % 100 == 0) {
+			sample(hprev, p + i, 200);
+		//}
 	}
 	return 0;
+}
+
+void sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
+	//sample a sequence of integers from the model h is memory state,
+	//     seed_ix is seed letter for first time step
+	Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
+	x[seed_ix][0] = 1.0;
+	for (uint32_t i = 0; i < n; i++) {
+		Mat1d t = (Wxh * x) + (Whh * h) + bh;
+		Mat1d h = Mat::zeros(t.size(), t.type());
+		for (uint32_t i = 0; i < t.rows; i++) {
+			h[i][0] = tanh(t[i][0]);
+		}
+	}
 }
