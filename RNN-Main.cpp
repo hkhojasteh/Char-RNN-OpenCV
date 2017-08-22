@@ -9,15 +9,22 @@
 #include <iostream>
 #include <vector>
 #include <algorithm>
+#include <random>
 #include <math.h>
+#include <time.h>
 
 using namespace std;
 using namespace cv;
 using namespace cv::ml;
 
 typedef tuple<char, uint32_t> enumerate;
+struct IncGenerator {
+	int current_;
+	IncGenerator(int start) : current_(start) {}
+	int operator() () { return current_++; }
+};
 
-void sample(Mat1d, uint32_t, uint32_t);
+vector<int> sample(Mat1d, uint32_t, uint32_t);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
@@ -60,7 +67,6 @@ int main() {
 	Whh.create(hidden_size, hidden_size);
 	Why.create(vocab_size, hidden_size);
 	double mean = 0.0, stddev = 1.0 / 3.0;				//99.7% of values will be inside [-1, +1] interval
-
 	randn(Wxh, Scalar(mean), Scalar(stddev));			//input to hidden
 	randn(Whh, Scalar(mean), Scalar(stddev));			//hidden to hidden
 	randn(Why, Scalar(mean), Scalar(stddev));			//hidden to output
@@ -94,23 +100,44 @@ int main() {
 		}
 
 		//Sample from the model now and then
-		//if (n % 100 == 0) {
+		if (n % 100 == 0) {
 			sample(hprev, p + i, 200);
-		//}
+		}
 	}
 	return 0;
 }
 
-void sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
+vector<int> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
 	//sample a sequence of integers from the model h is memory state,
 	//     seed_ix is seed letter for first time step
 	Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
 	x[seed_ix][0] = 1.0;
+	vector<int> ixes; 
 	for (uint32_t i = 0; i < n; i++) {
 		Mat1d t = (Wxh * x) + (Whh * h) + bh;
 		Mat1d h = Mat::zeros(t.size(), t.type());
 		for (uint32_t i = 0; i < t.rows; i++) {
 			h[i][0] = tanh(t[i][0]);
 		}
+		Mat1d y = (Why * h) + by;
+		Mat1d expy;
+		exp(y, expy);
+		Mat1d p = expy / sum(expy)[0];
+		p = p.reshape(1, 1);
+
+		//Generates a random sample from a given 1-D array
+		default_random_engine generator;
+		discrete_distribution<int> distribution(p.begin(), p.end());
+		vector<double> indices(p.size().width);
+		generate(indices.begin(), indices.end(), [&generator, &distribution]() { return distribution(generator); });
+		vector<int> incNumbers(p.size().width);
+		IncGenerator gi(0);
+		generate(incNumbers.begin(), incNumbers.end(), gi);
+		srand(time(0));
+		Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
+		int randSelect = (uint32_t)rand() % vocab_size;
+		x[randSelect][0] = 1.0;
+		ixes.push_back(randSelect);
 	}
+	return ixes;
 }
