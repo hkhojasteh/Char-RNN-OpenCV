@@ -25,6 +25,7 @@ struct IncGenerator {
 };
 
 vector<uint32_t> sample(Mat1d, uint32_t, uint32_t);
+void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
@@ -39,6 +40,7 @@ int main() {
 	string fileName = "input.txt";
 	inputfile = fopen(fileName.c_str(), "r");
 
+	uint32_t i = 0;
 	while (!feof(inputfile)) {
 		char inchar[1] = { 0 };
 		fscanf(inputfile, "%c", inchar);
@@ -49,7 +51,8 @@ int main() {
 		//If this is not in the char set
 		if (it == end(chars)) {
 			chars.push_back(inchar[0]);
-			charenum.push_back(make_tuple(inchar[0], 0));
+			charenum.push_back(make_tuple(inchar[0], i));
+			i++;
 		}
 	}
 
@@ -108,6 +111,8 @@ int main() {
 				printf("%c", get<0>(ix_to_char[sampWords[i]]));
 			}
 		}
+		
+		lossFun(inputs, targets, hprev);
 
 		p += seq_length;								//move data pointer
 		n += 1;											//iteration counter
@@ -147,4 +152,21 @@ vector<uint32_t> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
 		ixes.push_back(randSelect);
 	}
 	return ixes;
+}
+
+void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
+	//inputs, targets are both list of integers.
+	//     hprev is Hx1 array of initial hidden state
+	//     returns the loss, gradients on model parameters, and last hidden state
+	Mat1d hs = hprev;
+	double loss = 0.0;
+	Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);
+	//forward pass
+	for (uint32_t t = 0; t < inputs.size(); t++) {
+		xs[t][get<1>(inputs[t])] = 1;
+		Mat1d val = Wxh * xs.row(t).t();
+		for (uint32_t i = 0; i < val.rows; i++) {
+			hs[i][0] = tanh(val[i][0]);
+		}
+	}
 }
