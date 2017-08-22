@@ -14,7 +14,7 @@ We have not written any unit tests just yet, but we hope to do that soon.
 
 ## Copyright
 
-Copyright (c) 2014 Hadi Abdi Khojasteh
+Copyright (c) 2017 Hadi Abdi Khojasteh
 
 ## License
 
