@@ -24,12 +24,14 @@ struct IncGenerator {
 	int operator() () { return current_++; }
 };
 
-vector<int> sample(Mat1d, uint32_t, uint32_t);
+vector<uint32_t> sample(Mat1d, uint32_t, uint32_t);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
 
 int main() {
+	srand(time(NULL));
+
 	vector<char> data;
 	vector<char> chars;
 	vector<enumerate> charenum;
@@ -85,7 +87,7 @@ int main() {
 
 	Mat1d loss, dWxh, dWhh, dWhy, dbh, dby, hprev;
 	vector<enumerate> inputs, targets;
-	for (uint32_t i = 0; i < 100; i++) {
+	for (uint32_t i = 0; i < 1000; i++) {
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
 		if (p + seq_length + 1 >= data.size() || n == 0) {
 			hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
@@ -101,18 +103,24 @@ int main() {
 
 		//Sample from the model now and then
 		if (n % 100 == 0) {
-			sample(hprev, p + i, 200);
+			vector<uint32_t> sampWords = sample(hprev, p + i, 200);
+			for (uint32_t i = 0; i < sampWords.size(); i++) {
+				printf("%c", get<0>(ix_to_char[sampWords[i]]));
+			}
 		}
+
+		p += seq_length;								//move data pointer
+		n += 1;											//iteration counter
 	}
 	return 0;
 }
 
-vector<int> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
+vector<uint32_t> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
 	//sample a sequence of integers from the model h is memory state,
 	//     seed_ix is seed letter for first time step
 	Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
 	x[seed_ix][0] = 1.0;
-	vector<int> ixes; 
+	vector<uint32_t> ixes; 
 	for (uint32_t i = 0; i < n; i++) {
 		Mat1d t = (Wxh * x) + (Whh * h) + bh;
 		Mat1d h = Mat::zeros(t.size(), t.type());
@@ -133,7 +141,6 @@ vector<int> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
 		vector<int> incNumbers(p.size().width);
 		IncGenerator gi(0);
 		generate(incNumbers.begin(), incNumbers.end(), gi);
-		srand(time(0));
 		Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
 		int randSelect = (uint32_t)rand() % vocab_size;
 		x[randSelect][0] = 1.0;
