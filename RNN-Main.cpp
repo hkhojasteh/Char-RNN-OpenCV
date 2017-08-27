@@ -111,6 +111,7 @@ uint32_t main() {
 			for (uint32_t i = 0; i < sampWords.size(); i++) {
 				printf("%c", get<0>(ix_to_char[sampWords[i]]));
 			}
+			printf("\n");
 		}
 		
 		lossFun(inputs, targets, hprev);
@@ -173,10 +174,16 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 			hs[i][0] += temp[i][0] + bh[i][0];				//hidden state
 		}
 		Mat1d ys = (Why * hs[t][0]) + by[t][0];				//unnormalized log probabilities for next chars
+		//probabilities for next chars
+		Mat1d ps = Mat::zeros(ys.size(), ys.type());
+		double sum = 0.0;
 		for (uint32_t i = 0; i < ys.rows; i++) {
-			hs[i][0] = tanh(val[i][0]);
-			Mat1d temp = (Whh * hs[i - 1][0]);
-			hs[i][0] += temp[i][0] + bh[i][0];				//hidden state
+			sum += ps[t][i];
+			ps[t][i] = exp(ys[t][i]);
 		}
+		for (uint32_t i = 0; i < ys.rows; i++) {
+			ps[t][0] = ps[t][0] / sum;
+		}
+		loss += -log(ps[t][get<1>(targets[t])]);			//softmax (cross-entropy loss)
 	}
 }
