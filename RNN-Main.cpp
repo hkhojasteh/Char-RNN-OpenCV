@@ -162,6 +162,7 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	//     returns the loss, gradients on model parameters, and last hidden state
 	Mat1d hs = hprev;
 	double loss = 0.0;
+	Mat1d ps;
 	//forward pass
 	for (uint32_t t = 0; t < inputs.size(); t++) {
 		//encode in 1-of-k
@@ -175,7 +176,7 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 		}
 		Mat1d ys = (Why * hs[t][0]) + by[t][0];				//unnormalized log probabilities for next chars
 		//probabilities for next chars
-		Mat1d ps = Mat::zeros(ys.size(), ys.type());
+		ps = Mat::zeros(ys.size(), ys.type());
 		double sum = 0.0;
 		for (uint32_t i = 0; i < ys.rows; i++) {
 			sum += ps[t][i];
@@ -185,5 +186,18 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 			ps[t][0] = ps[t][0] / sum;
 		}
 		loss += -log(ps[t][get<1>(targets[t])]);			//softmax (cross-entropy loss)
+	}
+	//backward pass: compute gradients going backwards
+	Mat1d dWxh = Mat::zeros(Wxh.size(), Wxh.type());
+	Mat1d dWhh = Mat::zeros(Whh.size(), Whh.type());
+	Mat1d dWhy = Mat::zeros(Why.size(), Why.type());
+	Mat1d dbh = Mat::zeros(bh.size(), bh.type());
+	Mat1d dby = Mat::zeros(by.size(), by.type());
+	Mat1d dhnext = Mat::zeros(hs.size(), hs.type());
+	for (uint32_t t = inputs.size() - 1; t >= 0; t--){
+		//backprop into y
+		Mat1d dy = Mat::zeros(ps.size(), ps.type());
+		dy[get<1>(targets[t])][0] -= 1;
+		dWhy += dy * hs;
 	}
 }
