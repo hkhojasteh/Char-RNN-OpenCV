@@ -19,9 +19,9 @@ using namespace cv::ml;
 
 typedef tuple<char, uint32_t> enumerate;
 struct IncGenerator {
-	int current_;
-	IncGenerator(int start) : current_(start) {}
-	int operator() () { return current_++; }
+	uint32_t current_;
+	IncGenerator(uint32_t start) : current_(start) {}
+	uint32_t operator() () { return current_++; }
 };
 
 vector<uint32_t> sample(Mat1d, uint32_t, uint32_t);
@@ -30,7 +30,7 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
 
-int main() {
+uint32_t main() {
 	srand(time(NULL));
 
 	vector<char> data;
@@ -170,7 +170,13 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 		for (uint32_t i = 0; i < val.rows; i++) {
 			hs[i][0] = tanh(val[i][0]);
 			Mat1d temp = (Whh * hs[i - 1][0]);
-			hs[i][0] += temp[i][0];
+			hs[i][0] += temp[i][0] + bh[i][0];				//hidden state
+		}
+		Mat1d ys = (Why * hs[t][0]) + by[t][0];				//unnormalized log probabilities for next chars
+		for (uint32_t i = 0; i < ys.rows; i++) {
+			hs[i][0] = tanh(val[i][0]);
+			Mat1d temp = (Whh * hs[i - 1][0]);
+			hs[i][0] += temp[i][0] + bh[i][0];				//hidden state
 		}
 	}
 }
