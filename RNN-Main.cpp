@@ -55,6 +55,7 @@ int main() {
 			i++;
 		}
 	}
+	fclose(inputfile);
 
 	data_size = data.size();
 	vocab_size = chars.size();
@@ -78,7 +79,7 @@ int main() {
 	bh = Mat::zeros(hidden_size, 1, CV_32F);			//hidden bias
 	by = Mat::zeros(vocab_size, 1, CV_32F);				//output bias
 
-	uint32_t n, p = 0;
+	uint32_t n = 0, p = 0;
 	//Make an array of zeros with the same shape and type as a Ws array.
 	Mat1d mWxh = Mat::zeros(Wxh.size(), Wxh.type());
 	Mat1d mWhh = Mat::zeros(Whh.size(), Whh.type());
@@ -97,9 +98,9 @@ int main() {
 			p = 0;										//go from start of data
 		}
 
-		for (uint32_t i = 0; i < seq_length; i++) {
-			inputs.clear();
-			targets.clear();
+		inputs.clear();
+		targets.clear();
+		for (uint32_t i = 0; i < seq_length && p + i < char_to_ix.size(); i++) {
 			inputs.push_back(char_to_ix[p + i]);
 			targets.push_back(char_to_ix[p + 1 + i]);
 		}
@@ -160,13 +161,16 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	//     returns the loss, gradients on model parameters, and last hidden state
 	Mat1d hs = hprev;
 	double loss = 0.0;
-	Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);
 	//forward pass
 	for (uint32_t t = 0; t < inputs.size(); t++) {
+		//encode in 1-of-k
+		Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);
 		xs[t][get<1>(inputs[t])] = 1;
-		Mat1d val = Wxh * xs.row(t).t();
+		Mat1d val = (Wxh * xs.row(t).t());
 		for (uint32_t i = 0; i < val.rows; i++) {
 			hs[i][0] = tanh(val[i][0]);
+			Mat1d temp = (Whh * hs[i - 1][0]);
+			hs[i][0] += temp[i][0];
 		}
 	}
 }
