@@ -46,14 +46,14 @@ uint32_t main() {
 		fscanf(inputfile, "%c", inchar);
 		data.push_back(inchar[0]);
 
-		auto it = find_if(chars.begin(), chars.end(),
-			[&](const char element) { return element == inchar[0]; });
+		//auto it = find_if(chars.begin(), chars.end(),
+		//	[&](const char element) { return element == inchar[0]; });
 		//If this is not in the char set
-		if (it == end(chars)) {
+		//if (it == end(chars)) {
 			chars.push_back(inchar[0]);
 			charenum.push_back(make_tuple(inchar[0], i));
 			i++;
-		}
+		//}
 	}
 	fclose(inputfile);
 
@@ -100,7 +100,7 @@ uint32_t main() {
 
 		inputs.clear();
 		targets.clear();
-		for (uint32_t i = 0; i < seq_length && p + i < char_to_ix.size(); i++) {
+		for (uint32_t i = 0; i < seq_length && p + i < char_to_ix.size() - 1; i++) {
 			inputs.push_back(char_to_ix[p + i]);
 			targets.push_back(char_to_ix[p + 1 + i]);
 		}
@@ -194,10 +194,13 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	Mat1d dbh = Mat::zeros(bh.size(), bh.type());
 	Mat1d dby = Mat::zeros(by.size(), by.type());
 	Mat1d dhnext = Mat::zeros(hs.size(), hs.type());
-	for (uint32_t t = inputs.size() - 1; t >= 0; t--){
+	for (int32_t time = inputs.size() - 1; time >= 0; time--){
 		//backprop into y
-		Mat1d dy = Mat::zeros(ps.size(), ps.type());
-		dy[get<1>(targets[t])][0] -= 1;
+		cout << time;
+		Mat1d dy = Mat::zeros(0, ps.cols, ps.type());
+		dy.push_back(ps.row(time));
+		dy[0][get<1>(targets[time])] -= 1;
+		cout << dy << endl << endl ;
 		dWhy += dy * hs;
 	}
 }
