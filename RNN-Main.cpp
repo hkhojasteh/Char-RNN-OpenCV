@@ -25,7 +25,7 @@ struct IncGenerator {
 };
 
 vector<uint32_t> sample(Mat1d, uint32_t, uint32_t);
-void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
+double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
@@ -87,11 +87,11 @@ uint32_t main() {
 	Mat1d mbh = Mat::zeros(bh.size(), bh.type());		//memory variables for Adagrad
 	Mat1d mby = Mat::zeros(by.size(), by.type());		//memory variables for Adagrad
 	//loss at iteration 0
-	double smooth_loss = -log(1.0 / vocab_size) * seq_length;
+	double smooth_loss = -log(1.0 / vocab_size) * seq_length, loss = 0.0;
 
-	Mat1d loss, dWxh, dWhh, dWhy, dbh, dby, hprev;
+	Mat1d dWxh, dWhh, dWhy, dbh, dby, hprev;
 	vector<enumerate> inputs, targets;
-	for (uint32_t i = 0; i < 1000; i++) {
+	for (uint32_t i = 0; i < 1e10; i++) {
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
 		if (p + seq_length + 1 >= data.size() || n == 0) {
 			hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
@@ -111,10 +111,13 @@ uint32_t main() {
 			for (uint32_t i = 0; i < sampWords.size(); i++) {
 				printf("%c", get<0>(ix_to_char[sampWords[i]]));
 			}
-			printf("\n");
 		}
 		
-		lossFun(inputs, targets, hprev);
+		loss = lossFun(inputs, targets, hprev);
+		smooth_loss = smooth_loss * 0.999 + loss * 0.001;
+		if (n % 100 == 0) {
+			printf("\niter %d, loss: %f\n", n, smooth_loss);
+		}
 
 		p += seq_length;								//move data pointer
 		n += 1;											//iteration counter
@@ -156,25 +159,37 @@ vector<uint32_t> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
 	return ixes;
 }
 
-void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
+double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	//inputs, targets are both list of integers.
 	//     hprev is Hx1 array of initial hidden state
 	//     returns the loss, gradients on model parameters, and last hidden state
-	Mat1d hs = hprev;
+	Mat1d xs;
+	Mat1d hs = Mat::zeros(hprev.rows, 0, hprev.type());
 	double loss = 0.0;
 	Mat1d ps;
 	//forward pass
 	for (uint32_t t = 0; t < inputs.size(); t++) {
 		//encode in 1-of-k
-		Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);
+		xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);
 		xs[t][get<1>(inputs[t])] = 1;
+
+		//calculate hidden state matrix (hidden x vocab_size)
 		Mat1d val = (Wxh * xs.row(t).t());
-		for (uint32_t i = 0; i < val.rows; i++) {
-			hs[i][0] = tanh(val[i][0]);
-			Mat1d temp = (Whh * hs[i - 1][0]);
-			hs[i][0] += temp[i][0] + bh[i][0];				//hidden state
+		Mat1d hsTemp = Mat::zeros(hs.rows, 1, hs.type());
+		//because of hs[-1] = np.copy(hprev) we must:
+		hsTemp[0][0] = tanh(val[0][0]);
+		Mat1d temp = (Whh * hprev[0][0]);
+		hsTemp[0][0] += temp[0][0] + bh[0][0];
+		
+		for (uint32_t i = 1; i < val.rows; i++) {
+			hsTemp[i][0] = tanh(val[i][0]);
+			Mat1d temp = (Whh * hsTemp[i - 1][0]);
+			hsTemp[i][0] += temp[i][0] + bh[i][0];			//hidden state
 		}
-		Mat1d ys = (Why * hs[t][0]) + by[t][0];				//unnormalized log probabilities for next chars
+		hconcat(hs, hsTemp, hs);
+		
+		//unnormalized log probabilities for next chars
+		Mat1d ys = (Why * hs[0][t]) + by[t][0];				//unnormalized log probabilities for next chars
 		//probabilities for next chars
 		ps = Mat::zeros(ys.size(), ys.type());
 		double sum = 0.0;
@@ -193,14 +208,20 @@ void lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	Mat1d dWhy = Mat::zeros(Why.size(), Why.type());
 	Mat1d dbh = Mat::zeros(bh.size(), bh.type());
 	Mat1d dby = Mat::zeros(by.size(), by.type());
-	Mat1d dhnext = Mat::zeros(hs.size(), hs.type());
-	for (int32_t time = inputs.size() - 1; time >= 0; time--){
+	Mat1d dhnext = Mat::zeros(hs.rows, 1, hs.type());
+	for (int32_t t = inputs.size() - 1; t >= 0; t--){
 		//backprop into y
-		cout << time;
 		Mat1d dy = Mat::zeros(0, ps.cols, ps.type());
-		dy.push_back(ps.row(time));
-		dy[0][get<1>(targets[time])] -= 1;
-		cout << dy << endl << endl ;
-		dWhy += dy * hs;
+		dy.push_back(ps.col(t));
+		dy[0][get<1>(targets[t])] -= 1;
+		//cout << dy << endl << endl ;
+		dWhy += dy * hs.col(t).t();
+		dby += dy;
+		Mat1d dh = (Why.t() * dy) + dhnext;
+		Mat1d dhraw = (1 - (hs[t][0] * hs[t][0])) * dh;
+		dbh += dhraw;
+		dWxh += dhraw * xs.row(t);
+		//dWhh += dhraw * hs.t();
 	}
+	return loss;
 }
