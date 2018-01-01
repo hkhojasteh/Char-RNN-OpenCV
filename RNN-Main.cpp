@@ -24,7 +24,7 @@ struct IncGenerator {
 	uint32_t operator() () { return current_++; }
 };
 
-vector<uint32_t> sample(Mat1d, uint32_t, uint32_t);
+vector<uint32_t> sample(Mat1d *, uint32_t, uint32_t);
 double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
 
 uint32_t data_size, vocab_size;
@@ -44,6 +44,9 @@ uint32_t main() {
 	while (!feof(inputfile)) {
 		char inchar[1] = { 0 };
 		fscanf(inputfile, "%c", inchar);
+		if (inchar[0] == 0) {
+			continue;
+		}
 		data.push_back(inchar[0]);
 
 		//auto it = find_if(chars.begin(), chars.end(),
@@ -107,7 +110,7 @@ uint32_t main() {
 
 		//Sample from the model now and then
 		if (n % 100 == 0) {
-			vector<uint32_t> sampWords = sample(hprev, p + i, 200);
+			vector<uint32_t> sampWords = sample(&hprev, p + i, 200);
 			for (uint32_t i = 0; i < sampWords.size(); i++) {
 				printf("%c", get<0>(ix_to_char[sampWords[i]]));
 			}
@@ -125,19 +128,19 @@ uint32_t main() {
 	return 0;
 }
 
-vector<uint32_t> sample(Mat1d h, uint32_t seed_ix, uint32_t n) {
+vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 	//sample a sequence of integers from the model h is memory state,
 	//     seed_ix is seed letter for first time step
 	Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
 	x[seed_ix][0] = 1.0;
 	vector<uint32_t> ixes; 
 	for (uint32_t i = 0; i < n; i++) {
-		Mat1d t = (Wxh * x) + (Whh * h) + bh;
-		Mat1d h = Mat::zeros(t.size(), t.type());
+		Mat1d t = (Wxh * x) + (Whh * (*h)) + bh;
+		(*h) = Mat::zeros(t.size(), t.type());
 		for (uint32_t i = 0; i < t.rows; i++) {
-			h[i][0] = tanh(t[i][0]);
+			(*h)[i][0] = tanh(t[i][0]);
 		}
-		Mat1d y = (Why * h) + by;
+		Mat1d y = (Why * (*h)) + by;
 		Mat1d expy;
 		exp(y, expy);
 		Mat1d p = expy / sum(expy)[0];
@@ -164,7 +167,9 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 	//     hprev is Hx1 array of initial hidden state
 	//     returns the loss, gradients on model parameters, and last hidden state
 	Mat1d xs;
-	Mat1d hs = Mat::zeros(hprev.rows, 0, hprev.type());
+	Mat1d hs = Mat::zeros(hprev.rows, 1, hprev.type());
+	hs = hprev;
+
 	double loss = 0.0;
 	Mat1d ps;
 	//forward pass
@@ -180,7 +185,7 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 		hsTemp[0][0] = tanh(val[0][0]);
 		Mat1d temp = (Whh * hprev[0][0]);
 		hsTemp[0][0] += temp[0][0] + bh[0][0];
-		
+
 		for (uint32_t i = 1; i < val.rows; i++) {
 			hsTemp[i][0] = tanh(val[i][0]);
 			Mat1d temp = (Whh * hsTemp[i - 1][0]);
@@ -209,19 +214,21 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 	Mat1d dbh = Mat::zeros(bh.size(), bh.type());
 	Mat1d dby = Mat::zeros(by.size(), by.type());
 	Mat1d dhnext = Mat::zeros(hs.rows, 1, hs.type());
-	for (int32_t t = inputs.size() - 1; t >= 0; t--){
+	for (int32_t t = inputs.size() - 1; t > 0; t--){
 		//backprop into y
 		Mat1d dy = Mat::zeros(0, ps.cols, ps.type());
 		dy.push_back(ps.col(t));
-		dy[0][get<1>(targets[t])] -= 1;
-		//cout << dy << endl << endl ;
+		dy[get<1>(targets[t])][0] -= 1;
 		dWhy += dy * hs.col(t).t();
 		dby += dy;
-		Mat1d dh = (Why.t() * dy) + dhnext;
-		Mat1d dhraw = (1 - (hs[t][0] * hs[t][0])) * dh;
+
+		Mat1d dh = (Why.t() * dy) + dhnext;					//backprop into h
+		Mat1d dhraw = (1 - (hs[t][0] * hs[t][0])) * dh;		//backprop through tanh nonlinearity
 		dbh += dhraw;
 		dWxh += dhraw * xs.row(t);
-		//dWhh += dhraw * hs.t();
+		dWhh += dhraw * hs.col(t).t();
+		dhnext = Whh.t() * dhraw;
 	}
+	//ToDo: Clip dWxh, dWhh, dWhy, dbh, dby matrices between -5, 5
 	return loss;
 }
