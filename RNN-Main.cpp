@@ -1,4 +1,4 @@
-//This program created by love by Hadi - Copyright(c) by Hadi Abdi Khojasteh - Summer 2017. All right reserved. / Email: hkhojasteh@iasbs.ac.ir, info@hadiabdikhojasteh.ir / Website: iasbs.ac.ir/~hkhojasteh, hadiabdikhojasteh.ir
+//Made with love by Hadi - Copyright(c) by Hadi Abdi Khojasteh - Summer 2017 until 2018. All right reserved. / Email: hkhojasteh@iasbs.ac.ir, info@hadiabdikhojasteh.ir / Website: iasbs.ac.ir/~hkhojasteh, hadiabdikhojasteh.ir
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
@@ -18,6 +18,7 @@ using namespace cv;
 using namespace cv::ml;
 
 typedef tuple<char, uint32_t> enumerate;
+typedef tuple<double, Mat1d, Mat1d, Mat1d, Mat1d, Mat1d, Mat1d> lossSet;
 struct IncGenerator {
 	uint32_t current_;
 	IncGenerator(uint32_t start) : current_(start) {}
@@ -25,7 +26,7 @@ struct IncGenerator {
 };
 
 vector<uint32_t> sample(Mat1d *, uint32_t, uint32_t);
-double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
+lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
@@ -49,14 +50,14 @@ uint32_t main() {
 		}
 		data.push_back(inchar[0]);
 
-		//auto it = find_if(chars.begin(), chars.end(),
-		//	[&](const char element) { return element == inchar[0]; });
+		auto it = find_if(chars.begin(), chars.end(),
+			[&](const char element) { return element == inchar[0]; });
 		//If this is not in the char set
-		//if (it == end(chars)) {
+		if (it == end(chars)) {
 			chars.push_back(inchar[0]);
-			charenum.push_back(make_tuple(inchar[0], i));
-			i++;
-		//}
+		}
+		charenum.push_back(make_tuple(inchar[0], i));
+		i++;
 	}
 	fclose(inputfile);
 
@@ -69,7 +70,7 @@ uint32_t main() {
 
 	//hyperparameters
 	uint32_t hidden_size = 100;							//size of hidden layer of neurons
-	uint32_t seq_length = 25;							//number of steps to unroll the RNN for
+	uint32_t seq_length = 5;							//number of steps to unroll the RNN for
 	double learning_rate = 1e-1;
 
 	Wxh.create(hidden_size, vocab_size);				//Or: Mat mat(2, 4, CV_64FC1);
@@ -116,11 +117,33 @@ uint32_t main() {
 			}
 		}
 		
-		loss = lossFun(inputs, targets, hprev);
+		lossSet d = lossFun(inputs, targets, hprev);
+		loss = get<0>(d);
+		dWxh = get<1>(d);
+		dWhh = get<2>(d);
+		dWhy = get<3>(d);
+		dbh = get<4>(d);
+		dby = get<5>(d);
+		hprev = get<6>(d);
+
 		smooth_loss = smooth_loss * 0.999 + loss * 0.001;
 		if (n % 100 == 0) {
 			printf("\niter %d, loss: %f\n", n, smooth_loss);
 		}
+
+		//perform parameter update with Adagrad
+		cv::sqrt(dWxh, mWxh);
+		cv::sqrt(dWhh, mWhh);
+		cv::sqrt(dWhy, mWhy);
+		cv::sqrt(dbh, mbh);
+		cv::sqrt(dby, mby);
+		cout << dby << endl << endl << mby;
+
+		/*Wxh = -learning_rate * dWxh / mWxh;
+		Whh = -learning_rate * dWhh / mWhh;
+		Why = -learning_rate * dWhy / mWhy;
+		bh = -learning_rate * dbh / mbh;
+		by = -learning_rate * dby / mby;*/
 
 		p += seq_length;								//move data pointer
 		n += 1;											//iteration counter
@@ -162,7 +185,7 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 	return ixes;
 }
 
-double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
+lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	//inputs, targets are both list of integers.
 	//     hprev is Hx1 array of initial hidden state
 	//     returns the loss, gradients on model parameters, and last hidden state
@@ -171,7 +194,8 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 	hs = hprev;
 
 	double loss = 0.0;
-	Mat1d ps;
+	//ps = Mat::zeros(ys.size(), ys.type());
+	Mat1d ps = Mat::zeros(Why.rows, 0, Why.type());;
 	//forward pass
 	for (uint32_t t = 0; t < inputs.size(); t++) {
 		//encode in 1-of-k
@@ -179,33 +203,36 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 		xs[t][get<1>(inputs[t])] = 1;
 
 		//calculate hidden state matrix (hidden x vocab_size)
-		Mat1d val = (Wxh * xs.row(t).t());
-		Mat1d hsTemp = Mat::zeros(hs.rows, 1, hs.type());
-		//because of hs[-1] = np.copy(hprev) we must:
-		hsTemp[0][0] = tanh(val[0][0]);
-		Mat1d temp = (Whh * hprev[0][0]);
-		hsTemp[0][0] += temp[0][0] + bh[0][0];
+		if(t != inputs.size() - 1){
+			Mat1d val = (Wxh * xs.row(t).t());
+			Mat1d hsTemp = Mat::zeros(hs.rows, 1, hs.type());
+			//because of hs[-1] = np.copy(hprev) we must:
+			hsTemp[0][0] = tanh(val[0][0]);
+			Mat1d temp = (Whh * hprev[0][0]);
+			hsTemp[0][0] += temp[0][0] + bh[0][0];
 
-		for (uint32_t i = 1; i < val.rows; i++) {
-			hsTemp[i][0] = tanh(val[i][0]);
-			Mat1d temp = (Whh * hsTemp[i - 1][0]);
-			hsTemp[i][0] += temp[i][0] + bh[i][0];			//hidden state
+			for (uint32_t i = 1; i < val.rows; i++) {
+				hsTemp[i][0] = tanh(val[i][0]);
+				Mat1d temp = (Whh * hsTemp[i - 1][0]);
+				hsTemp[i][0] += temp[i][0] + bh[i][0];			//hidden state
+			}
+			hconcat(hs, hsTemp, hs);
 		}
-		hconcat(hs, hsTemp, hs);
-		
+
 		//unnormalized log probabilities for next chars
-		Mat1d ys = (Why * hs[0][t]) + by[t][0];				//unnormalized log probabilities for next chars
+		Mat1d ys = (Why * hs[0][t]);// +by[t][0];				//unnormalized log probabilities for next chars
 		//probabilities for next chars
-		ps = Mat::zeros(ys.size(), ys.type());
-		double sum = 0.0;
-		for (uint32_t i = 0; i < ys.rows; i++) {
-			sum += ps[t][i];
-			ps[t][i] = exp(ys[t][i]);
+		//cout << endl << "sum of array " << sum(ys.row(t))[0] << endl;
+
+		Mat1d ysexp = Mat::zeros(hs.size(), hs.type());
+		exp(ys.col(t), ysexp);
+		hconcat(ps, ysexp / sum(ys.col(t))[0], ps);
+
+		Mat1d pslog = Mat::zeros(ps.size(), ps.type());
+		log(ps, pslog);
+		for (int32_t i = get<1>(targets[t]); i >= 0; i--) {
+			loss += pslog[t][i];			//softmax (cross-entropy loss)
 		}
-		for (uint32_t i = 0; i < ys.rows; i++) {
-			ps[t][0] = ps[t][0] / sum;
-		}
-		loss += -log(ps[t][get<1>(targets[t])]);			//softmax (cross-entropy loss)
 	}
 	//backward pass: compute gradients going backwards
 	Mat1d dWxh = Mat::zeros(Wxh.size(), Wxh.type());
@@ -215,12 +242,14 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 	Mat1d dby = Mat::zeros(by.size(), by.type());
 	Mat1d dhnext = Mat::zeros(hs.rows, 1, hs.type());
 	for (int32_t t = inputs.size() - 1; t > 0; t--){
-		//backprop into y
+		//compute derivative of error w.r.t the output probabilites - dE/dy[j] = y[j] - t[j]
 		Mat1d dy = Mat::zeros(0, ps.cols, ps.type());
 		dy.push_back(ps.col(t));
-		dy[get<1>(targets[t])][0] -= 1;
+		dy[get<1>(targets[t])][0] -= 1;						//backprop into y
 		dWhy += dy * hs.col(t).t();
 		dby += dy;
+		
+		//cout << sum(dWhy) << endl << dby << endl << endl;
 
 		Mat1d dh = (Why.t() * dy) + dhnext;					//backprop into h
 		Mat1d dhraw = (1 - (hs[t][0] * hs[t][0])) * dh;		//backprop through tanh nonlinearity
@@ -230,5 +259,5 @@ double lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev)
 		dhnext = Whh.t() * dhraw;
 	}
 	//ToDo: Clip dWxh, dWhh, dWhy, dbh, dby matrices between -5, 5
-	return loss;
+	return make_tuple(loss, dWxh, dWhh, dWhy, dbh, dby, hs.col(inputs.size() - 1));
 }
