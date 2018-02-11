@@ -31,8 +31,9 @@ Mat1d Wxh, Whh, Why, bh, by;							//model parameters
 
 //hyperparameters
 uint32_t hidden_size = 100;								//size of hidden layer of neurons
-uint32_t seq_length = 5;								//number of steps to unroll the RNN for
-double learning_rate = 1e-1;							//Learning rate is 0.1
+uint32_t seq_length = 10;								//number of steps to unroll the RNN for
+uint32_t iterations = 1e10;								//number of iterations
+double learning_rate = 1e-3;							//Learning rate is 0.1
 
 uint32_t main() {
 	srand(time(NULL));
@@ -51,6 +52,7 @@ uint32_t main() {
 		if (inchar[0] == 0) {
 			continue;
 		}
+		inchar[0] = (char)tolower((int)inchar[0]);
 		data.push_back(inchar[0]);
 
 		auto it = find_if(chars.begin(), chars.end(),
@@ -67,6 +69,10 @@ uint32_t main() {
 	data_size = data.size();
 	vocab_size = chars.size();
 	printf("data has %d characters, %d unique.\n", data_size, vocab_size);
+	for (uint32_t i = 0; i < vocab_size; i++) {
+		printf("%c ", chars[i]);
+	}
+	printf("\n\n");
 	vector<enumerate> char_to_ix = charenum;
 	//reverse(charenum.begin(), charenum.end());
 	//vector<enumerate> ix_to_char = charenum;
@@ -96,7 +102,7 @@ uint32_t main() {
 
 	Mat1d hprev;
 	vector<enumerate> inputs, targets;
-	for (uint32_t i = 0; i < 350; i++) {
+	for (uint32_t i = 0; i < iterations; i++) {
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
 		if (p + seq_length + 1 >= data.size() || n == 0) {
 			hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
@@ -112,7 +118,7 @@ uint32_t main() {
 
 		//Sample from the model now and then
 		if (n % 100 == 0) {
-			vector<uint32_t> sampWords = sample(&hprev, p + i, 200);
+			vector<uint32_t> sampWords = sample(&hprev, p, 200);
 			for (uint32_t i = 0; i < sampWords.size(); i++) {
 				printf("%c", get<0>(char_to_ix[sampWords[i]]));
 			}
@@ -149,6 +155,7 @@ uint32_t main() {
 		p += seq_length;								//move data pointer
 		n += 1;											//iteration counter
 	}
+	scanf("%d", NULL);
 	return 0;
 }
 
@@ -258,12 +265,8 @@ lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev
 		Mat1d expys;
 		exp(ys.col(t), expys);											//probabilities for next chars
 		hconcat(ps, expys / sum(expys)[0], ps);
-
-		Mat1d logps;
-		log(ps, logps);
-		logps = -logps;
 		for (int32_t i = get<1>(targets[t]) - 1; i >= 0; i--) {
-			loss += logps[t][i];										//softmax (cross-entropy loss)
+			loss += -log(ps[t][i]);										//softmax (cross-entropy loss)
 		}
 	}
 	//backward pass: compute gradients going backwards
