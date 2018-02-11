@@ -175,7 +175,8 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 	//h is changed in calling this function beacuse of hprev in main
 	Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
 	x[seed_ix][0] = 1.0;
-	vector<uint32_t> ixes; 
+	//Set up our one-hot encoded input vector based on the seed character.
+	vector<uint32_t> ixes;
 	for (uint32_t i = 0; i < n; i++) {
 		Mat1d t = (Wxh * x) + (Whh * (*h)) + bh;
 		(*h) = Mat::zeros(t.size(), t.type());
@@ -184,7 +185,7 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 		}
 		Mat1d y = (Why * (*h)) + by;
 
-		Mat1d expy; 
+		Mat1d expy;
 		exp(y, expy);
 		Mat1d p = expy / sum(expy)[0];
 		//Generates a random sample from a given 1-D array
@@ -194,7 +195,6 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 		cv::minMaxLoc(p, &min, &max, &min_loc, &max_loc);
 		uint32_t randSelect = max_loc.y;
 
-		x = Mat::zeros(vocab_size, 1, CV_32F);
 		x[randSelect][0] = 1.0;
 		ixes.push_back(randSelect);
 	}
@@ -276,7 +276,7 @@ lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev
 	for (int32_t t = inputs.size() - 1; t >= 0; t--){
 		//compute derivative of error w.r.t the output probabilites - dE/dy[j] = y[j] - t[j]
 		Mat1d dy = ps.col(t);
-		dy[get<1>(targets[t])][0] -= 1;						//backprop into y
+		dy[get<1>(targets[t])][0] -= 1;						//backprop into y. The gradient of the cross-entropy loss is really as copying over the distribution and subtracting 1 from the correct class.
 		dWhy += dy * hs.row(t);
 		dby += dy;
 		Mat1d dh = (Why.t() * dy) + dhnext;					//backprop into h
