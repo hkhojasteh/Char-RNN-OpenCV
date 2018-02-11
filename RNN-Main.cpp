@@ -1,4 +1,4 @@
-//Made with love by Hadi - Copyright(c) by Hadi Abdi Khojasteh - 2017-2018. All right reserved. / Email: hkhojasteh@iasbs.ac.ir, info@hadiabdikhojasteh.ir / Website: iasbs.ac.ir/~hkhojasteh, hadiabdikhojasteh.ir
+//Made with love by Hadi - Copyright(c) by Hadi Abdi Khojasteh - 2017-2018. All right reserved. / Email: hkhojasteh [at] iasbs.ac.ir, info [at] hadiabdikhojasteh.ir / Website: iasbs.ac.ir/~hkhojasteh, hadiabdikhojasteh.ir
 
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
@@ -19,24 +19,20 @@ using namespace cv::ml;
 
 typedef tuple<char, uint32_t> enumerate;
 typedef tuple<double, Mat1d, Mat1d, Mat1d, Mat1d, Mat1d, Mat1d> lossSet;
-struct IncGenerator {
-	uint32_t current_;
-	IncGenerator(uint32_t start) : current_(start) {}
-	uint32_t operator() () { return current_++; }
-};
 
 enumerate findWord(vector<enumerate>, char);
-void updateAdagrad(Mat1d *, Mat1d *, Mat1d *);
+void updateAdagrad(Mat1d *, Mat1d, Mat1d *);
 vector<uint32_t> sample(Mat1d *, uint32_t, uint32_t);
+uint32_t selectByDistribution(Mat1d);
 lossSet lossFun(vector<enumerate>, vector<enumerate>, Mat1d);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
 
 //hyperparameters
-uint32_t hidden_size = 100;							//size of hidden layer of neurons
-uint32_t seq_length = 5;							//number of steps to unroll the RNN for
-double learning_rate = 1e-1;
+uint32_t hidden_size = 100;								//size of hidden layer of neurons
+uint32_t seq_length = 5;								//number of steps to unroll the RNN for
+double learning_rate = 1e-1;							//Learning rate is 0.1
 
 uint32_t main() {
 	srand(time(NULL));
@@ -82,6 +78,9 @@ uint32_t main() {
 	randn(Wxh, Scalar(mean), Scalar(stddev));			//input to hidden
 	randn(Whh, Scalar(mean), Scalar(stddev));			//hidden to hidden
 	randn(Why, Scalar(mean), Scalar(stddev));			//hidden to output
+	Wxh = Wxh * 0.01;
+	Whh = Whh * 0.01;
+	Why = Why * 0.01;
 	bh = Mat::zeros(hidden_size, 1, CV_32F);			//hidden bias
 	by = Mat::zeros(vocab_size, 1, CV_32F);				//output bias
 
@@ -97,7 +96,7 @@ uint32_t main() {
 
 	Mat1d hprev;
 	vector<enumerate> inputs, targets;
-	for (uint32_t i = 0; i < 1e10; i++) {
+	for (uint32_t i = 0; i < 350; i++) {
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
 		if (p + seq_length + 1 >= data.size() || n == 0) {
 			hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
@@ -120,33 +119,32 @@ uint32_t main() {
 			printf("\n");
 		}
 		
-		lossSet d = lossFun(inputs, targets, hprev);
-		loss = get<0>(d);
+		lossSet resl = lossFun(inputs, targets, hprev);
+		loss = get<0>(resl);
 		Mat1d dWxh, dWhh, dWhy, dbh, dby;
-		dWxh = get<1>(d);
-		dWhh = get<2>(d);
-		dWhy = get<3>(d);
-		dbh = get<4>(d);
-		dby = get<5>(d);
-		hprev = get<6>(d);
+		dWxh = get<1>(resl);
+		dWhh = get<2>(resl);
+		dWhy = get<3>(resl);
+		dbh = get<4>(resl);
+		dby = get<5>(resl);
+		hprev = get<6>(resl);
 
 		smooth_loss = smooth_loss * 0.999 + loss * 0.001;
 		if (n % 100 == 0) {
 			printf("\niter %d, loss: %f\n", n, smooth_loss);
 		}
+		//perform parameter update with Adagrad
+		updateAdagrad(&Wxh, dWxh, &mWxh);
+		updateAdagrad(&Whh, dWhh, &mWhh);
+		updateAdagrad(&Why, dWhy, &mWhy);
+		updateAdagrad(&bh, dbh, &mbh);
+		updateAdagrad(&by, dby, &mby);
+
 		/*Wxh = dWxh;
 		Whh = dWhh;
 		Why = dWhy;
-
 		bh = dbh;
 		by = dby;*/
-
-		//perform parameter update with Adagrad
-		updateAdagrad(&Wxh, &dWxh, &mWxh);
-		updateAdagrad(&Whh, &dWhh, &mWhh);
-		updateAdagrad(&Why, &dWhy, &mWhy);
-		updateAdagrad(&bh, &dbh, &mbh);
-		updateAdagrad(&by, &dby, &mby);
 
 		p += seq_length;								//move data pointer
 		n += 1;											//iteration counter
@@ -164,11 +162,12 @@ enumerate findWord(vector<enumerate> char_to_ix, char ichar) {
 	return make_tuple(ichar, index);
 }
 
-void updateAdagrad(Mat1d * param, Mat1d * dparam, Mat1d * mem) {
-	Mat1d powdparam;
-	pow((*dparam), 2, powdparam);
+void updateAdagrad(Mat1d * param, Mat1d dparam, Mat1d * mem) {
+	Mat1d powdparam, sqrtmem;
+	pow(dparam, 2, powdparam);
 	(*mem) += powdparam;
-	(*param) += -learning_rate * (*dparam);
+	sqrt((*mem), sqrtmem);
+	(*param) += (-learning_rate * dparam) / (sqrtmem + 1e-8);
 }
 
 vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
@@ -185,40 +184,62 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 		}
 		Mat1d y = (Why * (*h)) + by;
 
-		Mat1d expy;
+		Mat1d expy; 
 		exp(y, expy);
 		Mat1d p = expy / sum(expy)[0];
-		p = p.reshape(1, 1);
-
 		//Generates a random sample from a given 1-D array
-		/*default_random_engine generator;
-		discrete_distribution<int> distribution(p.begin(), p.end());
-		vector<double> indices(p.size().width);
-		generate(indices.begin(), indices.end(), [&generator, &distribution]() { return distribution(generator); });
-		vector<int> incNumbers(p.size().width);
-		IncGenerator gi(0);
-		generate(incNumbers.begin(), incNumbers.end(), gi);*/
+		//int32_t randSelect = selectByDistribution(p);
+		double min, max;
+		Point min_loc, max_loc;
+		cv::minMaxLoc(p, &min, &max, &min_loc, &max_loc);
+		uint32_t randSelect = max_loc.y;
+
 		x = Mat::zeros(vocab_size, 1, CV_32F);
-		int randSelect = (uint32_t)rand() % vocab_size;
 		x[randSelect][0] = 1.0;
 		ixes.push_back(randSelect);
 	}
 	return ixes;
 }
 
+uint32_t selectByDistribution(Mat1d p) {
+	//distribution function of X, evaluated at x, is the probability that X will take a value less than or equal to x.
+	vector<double> accumulatedProb;
+	accumulatedProb.push_back(p[0][0]);
+	for (uint32_t i = 1; i < p.rows; i++)
+		accumulatedProb.push_back(accumulatedProb[i - 1] + p[i][0]);
+
+	random_device rd;		//Will be used to obtain a seed for the random number engine
+	mt19937 gen(rd());		//Standard mersenne_twister_engine seeded with rd()
+	uniform_real_distribution<> dis(0.0, 1.0);
+	double selectedItem = dis(gen);
+
+	auto it = find_if(accumulatedProb.begin(), accumulatedProb.end(),
+		[&](double element) { return element >= selectedItem; });
+	if (it != end(accumulatedProb)) {
+		uint32_t dis = distance(accumulatedProb.begin(), it);
+		if (dis < accumulatedProb.size()){
+			return dis;
+		}else{
+			return -1;
+		}
+	}else{
+		return -1;
+	}
+}
+
 lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev) {
 	//inputs, targets are both list of integers.
 	//     hprev is Hx1 array of initial hidden state
 	//     returns the loss, gradients on model parameters, and last hidden state
-	Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);
-	Mat1d hs = Mat::zeros(inputs.size(), hprev.rows, hprev.type());
-	Mat1d ys = Mat::zeros(vocab_size, 0, hprev.type());
+	Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);			//one-hot inputs
+	Mat1d hs = Mat::zeros(inputs.size(), hprev.rows, hprev.type());		//hidden states
+	Mat1d ys = Mat::zeros(vocab_size, 0, hprev.type());					//outputs
+	Mat1d ps = Mat::zeros(Why.rows, 0, Why.type());						//softmax probabilities
 
 	double loss = 0.0;
-	Mat1d ps = Mat::zeros(Why.rows, 0, Why.type());;
 	//forward pass
 	for (uint32_t t = 0; t < inputs.size(); t++) {
-		//encode in 1-of-k
+		//encode in 1-of-k (Convert to a one-hot vector)
 		xs[t][get<1>(inputs[t])] = 1;
 
 		//calculate hidden state matrix (hidden x vocab_size)
@@ -240,6 +261,7 @@ lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev
 
 		Mat1d logps;
 		log(ps, logps);
+		logps = -logps;
 		for (int32_t i = get<1>(targets[t]) - 1; i >= 0; i--) {
 			loss += logps[t][i];										//softmax (cross-entropy loss)
 		}
@@ -272,18 +294,23 @@ lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev
 		}
 		dhnext = Whh.t() * dhraw;
 	}
-	//clip to mitigate exploding gradients
-	Mat1d tdWxh, tdWhh, tdWhy, tdbh, tdby;
-	threshold(dWxh, tdWxh, 5.0, 5, THRESH_TRUNC);
-	threshold(dWxh, tdWxh, -5.0, -5, THRESH_BINARY_INV);
-	threshold(dWhh, tdWhh, 5.0, 5, THRESH_TRUNC);
-	threshold(dWhh, tdWhh, -5.0, -5, THRESH_BINARY_INV);
-	threshold(dWhy, tdWhy, 5.0, 5, THRESH_TRUNC);
-	threshold(dWhy, tdWhy, -5.0, -5, THRESH_BINARY_INV);
-	threshold(dbh, tdbh, 5.0, 5, THRESH_TRUNC);
-	threshold(dbh, tdbh, -5.0, -5, THRESH_BINARY_INV);
-	threshold(dby, tdby, 5.0, 5, THRESH_TRUNC);
-	threshold(dby, tdby, -5.0, -5, THRESH_BINARY_INV);
+	//clip to mitigate explodfing gradients
+	Mat1d tdWxh, tdWhh, tdWhy, tdbh, tdby, thrtempf, thrtemps;
+	threshold(dWxh, thrtempf, 5.0, 5, THRESH_TRUNC);
+	threshold(dWxh, thrtemps, -5.0, -5, THRESH_BINARY_INV);
+	tdWxh = thrtempf + thrtemps;
+	threshold(dWhh, thrtempf, 5.0, 5, THRESH_TRUNC);
+	threshold(dWhh, thrtemps, -5.0, -5, THRESH_BINARY_INV);
+	tdWhh = thrtempf + thrtemps;
+	threshold(dWhy, thrtempf, 5.0, 5, THRESH_TRUNC);
+	threshold(dWhy, thrtemps, -5.0, -5, THRESH_BINARY_INV);
+	tdWhy = thrtempf + thrtemps;
+	threshold(dbh, thrtempf, 5.0, 5, THRESH_TRUNC);
+	threshold(dbh, thrtemps, -5.0, -5, THRESH_BINARY_INV);
+	tdbh = thrtempf + thrtemps;
+	threshold(dby, thrtempf, 5.0, 5, THRESH_TRUNC);
+	threshold(dby, thrtemps, -5.0, -5, THRESH_BINARY_INV);
+	tdby = thrtempf + thrtemps;
 
 	return make_tuple(loss, tdWxh, tdWhh, tdWhy, tdbh, tdby, hs.row(inputs.size() - 1).t());
 }
