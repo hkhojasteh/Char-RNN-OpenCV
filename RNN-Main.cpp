@@ -33,7 +33,7 @@ Mat1d Wxh, Whh, Why, bh, by;							//model parameters
 uint32_t hidden_size = 100;								//size of hidden layer of neurons
 uint32_t seq_length = 10;								//number of steps to unroll the RNN for
 uint32_t iterations = 1e10;								//number of iterations
-double learning_rate = 1e-3;							//Learning rate is 0.1
+double learning_rate = 1e-1;							//Learning rate is 0.1
 
 uint32_t main() {
 	srand(time(NULL));
@@ -187,8 +187,12 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 	for (uint32_t i = 0; i < n; i++) {
 		Mat1d t = (Wxh * x) + (Whh * (*h)) + bh;
 		(*h) = Mat::zeros(t.size(), t.type());
-		for (uint32_t i = 0; i < t.rows; i++) {
-			(*h)[i][0] = tanh(t[i][0]);
+#pragma omp parallel
+		{
+#pragma omp for schedule(dynamic) ordered
+			for (int i = 0; i < t.rows; i++) {
+				(*h)[i][0] = tanh(t[i][0]);
+			}
 		}
 		Mat1d y = (Why * (*h)) + by;
 
@@ -210,11 +214,14 @@ vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 
 uint32_t selectByDistribution(Mat1d p) {
 	//distribution function of X, evaluated at x, is the probability that X will take a value less than or equal to x.
-	vector<double> accumulatedProb;
-	accumulatedProb.push_back(p[0][0]);
-	for (uint32_t i = 1; i < p.rows; i++)
-		accumulatedProb.push_back(accumulatedProb[i - 1] + p[i][0]);
-
+	vector<double> accumulatedProb(p.rows + 1);
+	accumulatedProb[0] = p[0][0];
+#pragma omp parallel
+	{
+#pragma omp for schedule(dynamic) ordered
+		for (int i = 1; i < p.rows; i++)
+			accumulatedProb[i] = accumulatedProb[i - 1] + p[i][0];
+	}
 	random_device rd;		//Will be used to obtain a seed for the random number engine
 	mt19937 gen(rd());		//Standard mersenne_twister_engine seeded with rd()
 	uniform_real_distribution<> dis(0.0, 1.0);
