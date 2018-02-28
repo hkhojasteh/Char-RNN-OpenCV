@@ -25,6 +25,7 @@ void updateAdagrad(Mat1d *, Mat1d, Mat1d *);
 vector<uint32_t> sample(Mat1d *, uint32_t, uint32_t);
 uint32_t selectByDistribution(Mat1d);
 lossSet lossFun(vector<enumerate>, vector<enumerate>, Mat1d);
+Mat1d clip(Mat1d inMatrx, double min, double max);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
@@ -305,22 +306,19 @@ lossSet lossFun(vector<enumerate> inputs, vector<enumerate> targets, Mat1d hprev
 		dhnext = Whh.t() * dhraw;
 	}
 	//clip to mitigate explodfing gradients
-	Mat1d tdWxh, tdWhh, tdWhy, tdbh, tdby, thrtempf, thrtemps;
-	threshold(dWxh, thrtempf, 5.0, 5, THRESH_TRUNC);
-	threshold(dWxh, thrtemps, -5.0, -5, THRESH_BINARY_INV);
-	tdWxh = thrtempf + thrtemps;
-	threshold(dWhh, thrtempf, 5.0, 5, THRESH_TRUNC);
-	threshold(dWhh, thrtemps, -5.0, -5, THRESH_BINARY_INV);
-	tdWhh = thrtempf + thrtemps;
-	threshold(dWhy, thrtempf, 5.0, 5, THRESH_TRUNC);
-	threshold(dWhy, thrtemps, -5.0, -5, THRESH_BINARY_INV);
-	tdWhy = thrtempf + thrtemps;
-	threshold(dbh, thrtempf, 5.0, 5, THRESH_TRUNC);
-	threshold(dbh, thrtemps, -5.0, -5, THRESH_BINARY_INV);
-	tdbh = thrtempf + thrtemps;
-	threshold(dby, thrtempf, 5.0, 5, THRESH_TRUNC);
-	threshold(dby, thrtemps, -5.0, -5, THRESH_BINARY_INV);
-	tdby = thrtempf + thrtemps;
+	Mat1d tdWxh, tdWhh, tdWhy, tdbh, tdby;
+	tdWxh = clip(dWxh, -5.0, 0.5);
+	tdWhh = clip(dWhh, -5.0, 0.5);
+	tdWhy = clip(dWhy, -5.0, 0.5);
+	tdbh = clip(dbh, -5.0, 0.5);
+	tdby = clip(dby, -5.0, 0.5);
 
 	return make_tuple(loss, tdWxh, tdWhh, tdWhy, tdbh, tdby, hs.row(inputs.size() - 1).t());
+}
+
+Mat1d clip(Mat1d inMatrx, double min, double max){
+	Mat1d thrtempf, thrtemps;
+	threshold(inMatrx, thrtempf, max, max, THRESH_TRUNC);
+	threshold(inMatrx, thrtemps, min, min, THRESH_BINARY_INV);
+	return thrtempf + thrtemps;
 }
