@@ -36,9 +36,69 @@ uint32_t seq_length = 10;								//number of steps to unroll the RNN for
 uint32_t iterations = 1e10;								//number of iterations
 double learning_rate = 1e-1;							//Learning rate is 0.1
 
+Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
+	Mat1d output;
+	output.create(rows, cols);
+	double mean = 0.0, stddev = 1.0 / 3.0;				//99.7% of values will be inside [-1, +1] interval
+	randn(output, Scalar(mean), Scalar(stddev));		//Make random value matrix
+	return output * 0.01;
+}
+
+Mat1d initZerosMat(uint32_t rows, uint32_t cols) {
+	return Mat::zeros(rows, cols, CV_32F);
+}
+
+class read{
+private:
+	vector<char> data;
+	vector<char> chars;
+	vector<enumerate> charenum;
+	FILE* inputfile;
+public:
+	read(string path, uint32_t seq_length) {
+		inputfile = fopen(path.c_str(), "r");
+
+		uint32_t i = 0;
+		while (!feof(inputfile)) {
+			char inchar[1] = { 0 };
+			fscanf(inputfile, "%c", inchar);
+			if (inchar[0] == 0) {
+				continue;
+			}
+			inchar[0] = (char)tolower((int)inchar[0]);
+			data.push_back(inchar[0]);
+
+			auto it = find_if(chars.begin(), chars.end(),
+				[&](const char element) { return element == inchar[0]; });
+			//If this is not in the char set
+			if (it == end(chars)) {
+				chars.push_back(inchar[0]);
+				charenum.push_back(make_tuple(inchar[0], i));
+			}
+			i++;
+		}
+		fclose(inputfile);
+
+		data_size = data.size();
+		vocab_size = chars.size();
+	}
+protected:
+};
+
+/*(self, path, seq_length) :
+	self.fp = open(path, "r")
+	self.data = self.fp.read()
+	chars = list(set(self.data))
+	self.char_to_ix = { ch:i for (i,ch) in enumerate(chars) }
+	self.ix_to_char = { i:ch for (i,ch) in enumerate(chars) }
+	self.data_size = len(self.data)
+	self.vocab_size = len(chars)
+	self.pointer = 0
+	self.seq_length = seq_length
+	*/
+
 uint32_t main() {
 	srand(time(NULL));
-
 	vector<char> data;
 	vector<char> chars;
 	vector<enumerate> charenum;
