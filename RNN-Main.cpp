@@ -44,16 +44,17 @@ Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
 	return output * 0.01;
 }
 
-Mat1d initZerosMat(uint32_t rows, uint32_t cols) {
-	return Mat::zeros(rows, cols, CV_32F);
-}
-
 class read{
 private:
 	vector<char> data;
 	vector<char> chars;
 	vector<enumerate> charenum;
+	vector<enumerate> char_to_ix;
+	uint32_t data_size;
+	uint32_t vocab_size;
 	FILE* inputfile;
+	uint32_t p;											//pointer to the data index
+	uint32_t seq_length;
 public:
 	read(string path, uint32_t seq_length) {
 		inputfile = fopen(path.c_str(), "r");
@@ -81,21 +82,54 @@ public:
 
 		data_size = data.size();
 		vocab_size = chars.size();
+
+		printf("data has %d characters, %d unique.\n", data_size, vocab_size);
+		for (uint32_t i = 0; i < vocab_size; i++) {
+			printf("%c ", chars[i]);
+		}
+		printf("\n\n");
+		char_to_ix = charenum;
+		p = 0;
+		this->seq_length = seq_length;
+	}
+
+	void nextBatch(vector<enumerate> * inputs, vector<enumerate> * targets) {
+		uint32_t input_start = p;
+		uint32_t input_end = p + seq_length;
+		//inputs = [self.char_to_ix[ch] for ch in self.data[input_start:input_end]]
+		//targets = [self.char_to_ix[ch] for ch in self.data[input_start + 1:input_end + 1]]
+		
+		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
+		/*if (pointer + seq_length + 1 >= data.size() || n == 0) {
+			     hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
+
+
+
+			
+			pointer = 0;								//go from start of data and reset pointer
+		}*/
+
+		inputs->clear();
+		targets->clear();
+		for (uint32_t i = 0; i < seq_length && p + i + 1 < data.size() - 1; i++) {
+			inputs->push_back(findWord(char_to_ix, data[p + i]));
+			targets->push_back(findWord(char_to_ix, data[p + 1 + i]));
+		}
+
+		p += seq_length;
+	}
+
+	enumerate findWord(vector<enumerate> char_to_ix, char ichar) {
+		uint32_t index = -1;
+		auto it = find_if(char_to_ix.begin(), char_to_ix.end(),
+			[&](const enumerate element) { return get<0>(element) == ichar; });
+		if (it != end(char_to_ix)) {
+			index = get<1>(*it);
+		}
+		return make_tuple(ichar, index);
 	}
 protected:
 };
-
-/*(self, path, seq_length) :
-	self.fp = open(path, "r")
-	self.data = self.fp.read()
-	chars = list(set(self.data))
-	self.char_to_ix = { ch:i for (i,ch) in enumerate(chars) }
-	self.ix_to_char = { i:ch for (i,ch) in enumerate(chars) }
-	self.data_size = len(self.data)
-	self.vocab_size = len(chars)
-	self.pointer = 0
-	self.seq_length = seq_length
-	*/
 
 uint32_t main() {
 	srand(time(NULL));
@@ -129,6 +163,8 @@ uint32_t main() {
 
 	data_size = data.size();
 	vocab_size = chars.size();
+
+
 	printf("data has %d characters, %d unique.\n", data_size, vocab_size);
 	for (uint32_t i = 0; i < vocab_size; i++) {
 		printf("%c ", chars[i]);
@@ -138,16 +174,9 @@ uint32_t main() {
 	//reverse(charenum.begin(), charenum.end());
 	//vector<enumerate> ix_to_char = charenum;
 
-	Wxh.create(hidden_size, vocab_size);				//Or: Mat mat(2, 4, CV_64FC1);
-	Whh.create(hidden_size, hidden_size);
-	Why.create(vocab_size, hidden_size);
-	double mean = 0.0, stddev = 1.0 / 3.0;				//99.7% of values will be inside [-1, +1] interval
-	randn(Wxh, Scalar(mean), Scalar(stddev));			//input to hidden
-	randn(Whh, Scalar(mean), Scalar(stddev));			//hidden to hidden
-	randn(Why, Scalar(mean), Scalar(stddev));			//hidden to output
-	Wxh = Wxh * 0.01;
-	Whh = Whh * 0.01;
-	Why = Why * 0.01;
+	Wxh = initRandomMat(hidden_size, vocab_size);		//input to hidden - Mat mat(2, 4, CV_64FC1)
+	Whh = initRandomMat(hidden_size, hidden_size);		//hidden to hidden
+	Why = initRandomMat(vocab_size, hidden_size);		//hidden to output
 	bh = Mat::zeros(hidden_size, 1, CV_32F);			//hidden bias
 	by = Mat::zeros(vocab_size, 1, CV_32F);				//output bias
 
