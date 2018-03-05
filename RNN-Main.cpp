@@ -44,17 +44,12 @@ Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
 	return output * 0.01;
 }
 
-class read{
+class read {
 private:
-	vector<char> data;
-	vector<char> chars;
-	vector<enumerate> charenum;
-	vector<enumerate> char_to_ix;
-	uint32_t data_size;
-	uint32_t vocab_size;
+	vector<char> data, chars;
+	vector<enumerate> charenum, char_to_ix;
+	uint32_t data_size, vocab_size, p, seq_length;
 	FILE* inputfile;
-	uint32_t p;											//pointer to the data index
-	uint32_t seq_length;
 public:
 	read(string path, uint32_t seq_length) {
 		inputfile = fopen(path.c_str(), "r");
@@ -96,18 +91,11 @@ public:
 	void nextBatch(vector<enumerate> * inputs, vector<enumerate> * targets) {
 		uint32_t input_start = p;
 		uint32_t input_end = p + seq_length;
-		//inputs = [self.char_to_ix[ch] for ch in self.data[input_start:input_end]]
-		//targets = [self.char_to_ix[ch] for ch in self.data[input_start + 1:input_end + 1]]
-		
+
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
-		/*if (pointer + seq_length + 1 >= data.size() || n == 0) {
-			     hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
-
-
-
-			
-			pointer = 0;								//go from start of data and reset pointer
-		}*/
+		if (p + seq_length + 1 >= data.size()) {
+			p = 0;								//go from start of data and reset pointer
+		}
 
 		inputs->clear();
 		targets->clear();
@@ -128,8 +116,95 @@ public:
 		}
 		return make_tuple(ichar, index);
 	}
+
+	bool justStarted() {
+		return p == 0;
+	}
 protected:
 };
+
+class RNN {
+private:
+	uint32_t hidden_size, vocab_size, seq_length;
+	double learning_rate;
+	Mat1d Wxh, Whh, Why, bh, by;
+public:
+	RNN(uint32_t hidden_size, uint32_t vocab_size, uint32_t seq_length, double learning_rate) {
+		//Hyper parameters
+		this->hidden_size = hidden_size;
+		this->vocab_size = vocab_size;
+		this->seq_length = seq_length;
+		this->learning_rate = learning_rate;
+
+		//Model parameters
+		this->Wxh = initRandomMat(hidden_size, vocab_size);		//input to hidden - Mat mat(2, 4, CV_64FC1)
+		this->Whh = initRandomMat(hidden_size, hidden_size);		//hidden to hidden
+		this->Why = initRandomMat(vocab_size, hidden_size);		//hidden to output
+		this->bh = Mat::zeros(hidden_size, 1, CV_32F);			//hidden bias
+		this->by = Mat::zeros(vocab_size, 1, CV_32F);				//output bias
+
+		/*
+
+		//Memory vars for adagrad
+		Mat1d mWxh = Mat::zeros(Wxh.size(), Wxh.type());
+		Mat1d mWhh = Mat::zeros(Whh.size(), Whh.type());
+		Mat1d mWhy = Mat::zeros(Why.size(), Why.type());
+		Mat1d mbh = Mat::zeros(bh.size(), bh.type());		//memory variables for Adagrad
+		Mat1d mby = Mat::zeros(by.size(), by.type());		//memory variables for Adagrad
+
+
+		*/
+	}
+
+	void forward(vector<enumerate> inputs, Mat1d hprev) {
+		//inputs, targets are both list of integers.
+		//     hprev is Hx1 array of initial hidden state
+		Mat1d xs = Mat::zeros(inputs.size(), vocab_size, CV_32F);			//one-hot inputs
+		Mat1d hs = Mat::zeros(inputs.size(), hprev.rows, hprev.type());		//hidden states
+		Mat1d ys = Mat::zeros(vocab_size, 0, hprev.type());					//outputs
+		Mat1d ps = Mat::zeros(Why.rows, 0, Why.type());						//softmax probabilities
+																			//forward pass
+		for (uint32_t t = 0; t < inputs.size(); t++) {
+			//encode in 1-of-k (Convert to a one-hot vector)
+			xs[t][get<1>(inputs[t])] = 1;
+
+			//calculate hidden state matrix (hidden x vocab_size)
+			Mat1d val;
+			if (t == 0) {
+				val = (Wxh * xs.row(t).t()) + (Whh * hprev.col(0)) + bh;
+			}
+			else {
+				val = (Wxh * xs.row(t).t()) + (Whh * hs.row(t - 1).t()) + bh;
+			}
+			for (uint32_t i = 0; i < val.rows; i++) {
+				hs[t][i] = tanh(val[i][0]);
+			}
+			Mat1d ysTemp = (Why * hs.row(t).t()) + by[t][0];				//unnormalized log probabilities for next chars
+			hconcat(ys, ysTemp, ys);
+
+			Mat1d expys;
+			exp(ys.col(t), expys);											//probabilities for next chars
+			hconcat(ps, expys / sum(expys)[0], ps);
+			for (int32_t i = get<1>(targets[t]) - 1; i >= 0; i--) {
+				loss += -log(ps[t][i]);										//softmax (cross-entropy loss)
+			}
+		}
+	}
+protected:
+};
+
+/*
+	def forward(self, inputs, hprev):
+	xs, hs, ys, ps = {}, {}, {}, {}
+	hs[-1] = np.copy(hprev)
+	for t in xrange(len(inputs)):
+	xs[t] = zero_init(self.vocab_size,1)
+	xs[t][inputs[t]] = 1 # one hot encoding , 1-of-k
+	hs[t] = np.tanh(np.dot(self.Wxh,xs[t]) + np.dot(self.Whh,hs[t-1]) + self.bh) # hidden state
+	ys[t] = np.dot(self.Why,hs[t]) + self.by # unnormalised log probs for next char
+	ps[t] = np.exp(ys[t]) / np.sum(np.exp(ys[t])) # probs for next char
+	return xs, hs, ps
+*/
 
 uint32_t main() {
 	srand(time(NULL));
@@ -163,7 +238,6 @@ uint32_t main() {
 
 	data_size = data.size();
 	vocab_size = chars.size();
-
 
 	printf("data has %d characters, %d unique.\n", data_size, vocab_size);
 	for (uint32_t i = 0; i < vocab_size; i++) {
