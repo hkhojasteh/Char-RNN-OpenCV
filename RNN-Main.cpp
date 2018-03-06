@@ -17,16 +17,13 @@ using namespace std;
 using namespace cv;
 using namespace cv::ml;
 
-typedef tuple<char, uint32_t> enumerate;
 typedef tuple<double, Mat1d, Mat1d, Mat1d, Mat1d, Mat1d, Mat1d> lossSet;
-typedef tuple<Mat1d, Mat1d, Mat1d, Mat1d, Mat1d> paramSet;
 
 enumerate findWord(vector<enumerate>, char);
 void updateAdagrad(Mat1d *, Mat1d, Mat1d *);
 vector<uint32_t> sample(Mat1d *, uint32_t, uint32_t);
 uint32_t selectByDistribution(Mat1d);
 lossSet lossFun(vector<enumerate>, vector<enumerate>, Mat1d);
-Mat1d clip(Mat1d inMatrx, double min, double max);
 
 uint32_t data_size, vocab_size;
 Mat1d Wxh, Whh, Why, bh, by;							//model parameters
@@ -34,8 +31,14 @@ Mat1d Wxh, Whh, Why, bh, by;							//model parameters
 //hyperparameters
 uint32_t hidden_size = 100;								//size of hidden layer of neurons
 uint32_t seq_length = 10;								//number of steps to unroll the RNN for
-uint32_t iterations = 1e10;								//number of iterations
 double learning_rate = 1e-1;							//Learning rate is 0.1
+
+uint32_t iterations = 1e10;								//number of iterations
+
+class reader;
+class RNN;
+typedef tuple<char, uint32_t> enumerate;
+typedef tuple<Mat1d, Mat1d, Mat1d, Mat1d, Mat1d> paramSet;
 
 Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
 	Mat1d output;
@@ -45,14 +48,14 @@ Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
 	return output * 0.01;
 }
 
-class read {
+class reader {
 private:
 	vector<char> data, chars;
-	vector<enumerate> charenum, char_to_ix;
 	uint32_t data_size, vocab_size, p, seq_length;
 	FILE* inputfile;
 public:
-	read(string path, uint32_t seq_length) {
+	vector<enumerate> charenum, char_to_ix;
+	reader(string path, uint32_t seq_length) {
 		inputfile = fopen(path.c_str(), "r");
 
 		uint32_t i = 0;
@@ -88,7 +91,6 @@ public:
 		p = 0;
 		this->seq_length = seq_length;
 	}
-
 	void nextBatch(vector<enumerate> * inputs, vector<enumerate> * targets) {
 		uint32_t input_start = p;
 		uint32_t input_end = p + seq_length;
@@ -106,7 +108,6 @@ public:
 		}
 		p += seq_length;
 	}
-
 	enumerate findWord(vector<enumerate> char_to_ix, char ichar) {
 		uint32_t index = -1;
 		auto it = find_if(char_to_ix.begin(), char_to_ix.end(),
@@ -116,7 +117,6 @@ public:
 		}
 		return make_tuple(ichar, index);
 	}
-
 	bool justStarted() {
 		return p == 0;
 	}
@@ -152,10 +152,8 @@ public:
 		Mat1d mbh = Mat::zeros(bh.size(), bh.type());			//memory variables for Adagrad
 		Mat1d mby = Mat::zeros(by.size(), by.type());			//memory variables for Adagrad
 
-
 		*/
 	}
-
 	void forward(vector<enumerate> inputs, Mat1d hprev, Mat1d * xs, Mat1d * hs, Mat1d * ps) {
 		//inputs, targets are both list of integers.
 		//     hprev is Hx1 array of initial hidden state
@@ -188,7 +186,6 @@ public:
 			hconcat((*ps), expys / sum(expys)[0], (*ps));			//probabilities for next chars
 		}
 	}
-
 	paramSet backward(Mat1d xs, Mat1d hprev, Mat1d hs, Mat1d ps, vector<enumerate> targets) {
 		//Compute gradients going backwards
 		Mat1d dWxh = Mat::zeros(Wxh.size(), Wxh.type());
@@ -230,9 +227,99 @@ public:
 
 		return make_tuple(tdWxh, tdWhh, tdWhy, tdbh, tdby);
 	}
+	double modelLoss(Mat1d ps, vector<enumerate> targets) {
+		double loss = 0.0;
+		for (uint32_t t = 0; t < seq_length; t++) {
+			for (int32_t i = get<1>(targets[t]) - 1; i >= 0; i--) {
+				loss += -log(ps[t][i]);		//softmax (cross-entropy loss)
+			}
+		}
+		return loss;
+	}
+	void updateModel(Mat1d dWxh, Mat1d dWhh, Mat1d dWhy, Mat1d dbh, Mat1d dby) {
+		Mat1d mWxh = Mat::zeros(Wxh.size(), Wxh.type());
+		Mat1d mWhh = Mat::zeros(Whh.size(), Whh.type());
+		Mat1d mWhy = Mat::zeros(Why.size(), Why.type());
+		Mat1d mbh = Mat::zeros(bh.size(), bh.type());		//memory variables for Adagrad
+		Mat1d mby = Mat::zeros(by.size(), by.type());		//memory variables for Adagrad
+		updateAdagrad(&Wxh, dWxh, &mWxh);
+		updateAdagrad(&Whh, dWhh, &mWhh);
+		updateAdagrad(&Why, dWhy, &mWhy);
+		updateAdagrad(&bh, dbh, &mbh);
+		updateAdagrad(&by, dby, &mby);
+	}
+	void updateAdagrad(Mat1d * param, Mat1d dparam, Mat1d * mem) {
+		Mat1d powdparam, sqrtmem;
+		pow(dparam, 2, powdparam);
+		(*mem) += powdparam;
+		sqrt((*mem), sqrtmem);
+		(*param) += (-learning_rate * dparam) / (sqrtmem + 1e-8);
+	}
+	vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
+		//sample a sequence of integers from the model h is memory state, seed_ix is seed letter for first time step
+		//h is changed in calling this function beacuse of hprev in main
+		Mat1d x = Mat::zeros(vocab_size, 1, CV_32F);
+		x[seed_ix][0] = 1.0;
+		//Set up our one-hot encoded input vector based on the seed character.
+		vector<uint32_t> ixes;
+		for (uint32_t i = 0; i < n; i++) {
+			Mat1d t = (Wxh * x) + (Whh * (*h)) + bh;
+			(*h) = Mat::zeros(t.size(), t.type());
+	#pragma omp parallel
+			{
+	#pragma omp for schedule(dynamic) ordered
+				for (int i = 0; i < t.rows; i++) {
+					(*h)[i][0] = tanh(t[i][0]);
+				}
+			}
+			Mat1d y = (Why * (*h)) + by;
+
+			Mat1d expy;
+			exp(y, expy);
+			Mat1d p = expy / sum(expy)[0];
+			//Generates a random sample from a given 1-D array
+			//int32_t randSelect = selectByDistribution(p);
+			double min, max;
+			Point min_loc, max_loc;
+			cv::minMaxLoc(p, &min, &max, &min_loc, &max_loc);
+			uint32_t randSelect = max_loc.y;
+
+			x[randSelect][0] = 1.0;
+			ixes.push_back(randSelect);
+		}
+		return ixes;
+	}
+	void train(reader data) {
+		uint32_t iterNum = 0;
+		double smooth_loss = -log(1.0 / vocab_size) * seq_length, loss = 0.0;
+		Mat1d hprev;
+		vector<enumerate> inputs, targets;
+		Mat1d xs, hs, ps;
+		for (uint32_t i = 0; i < iterations; i++) {
+			if (data.justStarted()) {
+				hprev = Mat::zeros(hidden_size, 1, CV_32F);	//reset RNN memory
+			}
+			data.nextBatch(&inputs, &targets);
+			forward(inputs, hprev, &xs, &hs, &ps);
+			paramSet o = backward(xs, hprev, hs, ps, targets);
+			loss = modelLoss(ps, targets);
+			updateModel(get<0>(o), get<1>(o), get<2>(o), get<3>(o), get<4>(o));
+			smooth_loss = smooth_loss * 0.999 + loss * 0.001;
+			hprev = hs.row(seq_length - 1).t();
+
+			//Sample from the model now and then
+			if (iterNum % 100 == 0) {
+				vector<uint32_t> sampWords = sample(&hprev, get<1>(inputs[0]), 200);
+				for (uint32_t i = 0; i < sampWords.size(); i++) {
+					printf("%c", get<0>(data.char_to_ix[sampWords[i]]));
+				}
+				printf("\niter %d, loss: %f\n", iterNum, smooth_loss);
+			}
+			iterNum++;
+		}
+	}
 protected:
 };
-
 
 uint32_t main() {
 	srand(time(NULL));
