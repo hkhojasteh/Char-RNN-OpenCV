@@ -159,7 +159,9 @@ private:
 		Mat1d dhnext = Mat::zeros(hs.cols, 1, hs.type());
 		for (int32_t t = seq_length - 1; t >= 0; t--) {
 			//compute derivative of error w.r.t the output probabilites - dE/dy[j] = y[j] - t[j]
-			Mat1d dy = ps.col(t);
+			//Mat1d dy = ps.col(t);
+			Mat1d dy;
+			ps.col(t).copyTo(dy);
 			//backprop into y. The gradient of the cross-entropy loss is really as copying over the distribution and subtracting 1 from the correct class.
 			dy[get<1>(targets[t])][0] -= 1;
 			dWhy += dy * hs.row(t);
