@@ -30,7 +30,7 @@ Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
 	output.create(rows, cols);
 	double mean = 0.0, stddev = 1.0 / 3.0;				//99.7% of values will be inside [-1, +1] interval
 	randn(output, Scalar(mean), Scalar(stddev));		//Make random value matrix
-	return output * 0.01;
+	return abs(output * 0.01);
 }
 
 class reader {
@@ -134,16 +134,15 @@ private:
 			Mat1d val;
 			if (t == 0) {
 				val = (Wxh * (*xs).row(t).t()) + (Whh * hprev.col(0)) + bh;
-			}
-			else {
+			}else{
 				val = (Wxh * (*xs).row(t).t()) + (Whh * (*hs).row(t - 1).t()) + bh;
 			}
+
 			for (uint32_t i = 0; i < val.rows; i++) {
 				(*hs)[t][i] = tanh(val[i][0]);
 			}
 			Mat1d ysTemp = (Why * (*hs).row(t).t()) + by[t][0];		//unnormalized log probabilities for next chars
 			hconcat(ys, ysTemp, ys);
-
 			Mat1d expys;
 			exp(ys.col(t), expys);
 			hconcat((*ps), expys / sum(expys)[0], (*ps));			//probabilities for next chars
@@ -339,6 +338,7 @@ protected:
 };
 
 uint32_t main() {
+	cv::theRNG().state = time(0);
 	//hyperparameters
 	uint32_t hidden_size = 100;								//size of hidden layer of neurons
 	uint32_t seq_length = 10;								//number of steps to unroll the RNN for
