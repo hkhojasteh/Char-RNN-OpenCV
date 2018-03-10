@@ -20,9 +20,6 @@ using namespace cv::ml;
 typedef tuple<char, uint32_t> enumerate;
 typedef tuple<Mat1d, Mat1d, Mat1d, Mat1d, Mat1d> paramSet;
 
-uint32_t data_size, vocab_size;
-Mat1d Wxh, Whh, Why, bh, by;							//model parameters
-
 uint32_t iterations = 1e10;								//number of iterations
 
 Mat1d initRandomMat(uint32_t rows, uint32_t cols) {
@@ -86,9 +83,6 @@ public:
 		this->seq_length = seq_length;
 	}
 	void nextBatch(vector<enumerate> * inputs, vector<enumerate> * targets) {
-		uint32_t input_start = p;
-		uint32_t input_end = p + seq_length;
-
 		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
 		if (p + seq_length + 1 >= data.size()) {
 			p = 0;		//go from start of data and reset pointer
@@ -115,7 +109,7 @@ class RNN {
 private:
 	uint32_t hidden_size, vocab_size, seq_length;
 	double learning_rate;
-	Mat1d Wxh, Whh, Why, bh, by;
+	Mat1d Wxh, Whh, Why, bh, by, mWxh, mWhh, mWhy, mbh, mby;
 	void forward(vector<enumerate> inputs, Mat1d hprev, Mat1d * xs, Mat1d * hs, Mat1d * ps) {
 		//inputs, targets are both list of integers.
 		//     hprev is Hx1 array of initial hidden state
@@ -137,7 +131,6 @@ private:
 			}else{
 				val = (Wxh * (*xs).row(t).t()) + (Whh * (*hs).row(t - 1).t()) + bh;
 			}
-
 			for (uint32_t i = 0; i < val.rows; i++) {
 				(*hs)[t][i] = tanh(val[i][0]);
 			}
@@ -202,23 +195,19 @@ private:
 		return loss;
 	}
 	void updateModel(Mat1d dWxh, Mat1d dWhh, Mat1d dWhy, Mat1d dbh, Mat1d dby) {
-		Mat1d mWxh = Mat::zeros(Wxh.size(), Wxh.type());
-		Mat1d mWhh = Mat::zeros(Whh.size(), Whh.type());
-		Mat1d mWhy = Mat::zeros(Why.size(), Why.type());
-		Mat1d mbh = Mat::zeros(bh.size(), bh.type());		//memory variables for Adagrad
-		Mat1d mby = Mat::zeros(by.size(), by.type());		//memory variables for Adagrad
-		updateAdagrad(&Wxh, dWxh, &mWxh);
-		updateAdagrad(&Whh, dWhh, &mWhh);
-		updateAdagrad(&Why, dWhy, &mWhy);
-		updateAdagrad(&bh, dbh, &mbh);
-		updateAdagrad(&by, dby, &mby);
+		updateAdagrad(&this->Wxh, dWxh, &this->mWxh);
+		updateAdagrad(&this->Whh, dWhh, &this->mWhh);
+		updateAdagrad(&this->Why, dWhy, &this->mWhy);
+		updateAdagrad(&this->bh, dbh, &this->mbh);
+		updateAdagrad(&this->by, dby, &this->mby);
 	}
 	void updateAdagrad(Mat1d * param, Mat1d dparam, Mat1d * mem) {
+		//parameter update with adagrad
 		Mat1d powdparam, sqrtmem;
-		pow(dparam, 2, powdparam);
+		pow(dparam, 2.0, powdparam);
 		(*mem) += powdparam;
-		sqrt((*mem), sqrtmem);
-		(*param) += (-learning_rate * dparam) / (sqrtmem + 1e-8);
+		sqrt((*mem) + 1e-8, sqrtmem);
+		(*param) += -learning_rate * dparam / sqrtmem;	//adagrad update
 	}
 	vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 		//sample a sequence of integers from the model h is memory state, seed_ix is seed letter for first time step
@@ -304,6 +293,13 @@ public:
 		this->Why = initRandomMat(vocab_size, hidden_size);		//hidden to output
 		this->bh = Mat::zeros(hidden_size, 1, CV_32F);			//hidden bias
 		this->by = Mat::zeros(vocab_size, 1, CV_32F);			//output bias
+
+		//Memory vars for adagrad
+		this->mWxh = Mat::zeros(Wxh.size(), Wxh.type());
+		this->mWhh = Mat::zeros(Whh.size(), Whh.type());
+		this->mWhy = Mat::zeros(Why.size(), Why.type());
+		this->mbh = Mat::zeros(bh.size(), bh.type());		//memory variables for Adagrad
+		this->mby = Mat::zeros(by.size(), by.type());		//memory variables for Adagrad
 	}
 	void train(reader data) {
 		uint32_t iterNum = 0;
