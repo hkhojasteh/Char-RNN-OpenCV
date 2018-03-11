@@ -83,11 +83,6 @@ public:
 		this->seq_length = seq_length;
 	}
 	void nextBatch(vector<enumerate> * inputs, vector<enumerate> * targets) {
-		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
-		if (p + seq_length + 1 >= data.size()) {
-			p = 0;		//go from start of data and reset pointer
-		}
-
 		inputs->clear();
 		targets->clear();
 		for (uint32_t i = 0; i < seq_length && p + i + 1 < data.size() - 1; i++) {
@@ -95,6 +90,10 @@ public:
 			targets->push_back(this->findWord(char_to_ix, data[p + 1 + i]));
 		}
 		p += seq_length;
+		//Prepare inputs (we're sweeping from left to right in steps seq_length long)
+		if (p + seq_length + 1 >= data.size()) {
+			p = 0;		//go from start of data and reset pointer
+		}
 	}
 	bool justStarted() {
 		return p == 0;
@@ -119,8 +118,7 @@ private:
 		*ps = Mat::zeros(Why.rows, 0, Why.type());					//softmax probabilities
 		Mat1d ys = Mat::zeros(vocab_size, 0, hprev.type());			//outputs
 
-																	//forward pass
-		for (uint32_t t = 0; t < inputs.size(); t++) {
+		for (uint32_t t = 0; t < inputs.size(); t++) {				//forward pass
 			//encode in 1-of-k (Convert to a one-hot vector)
 			(*xs)[t][get<1>(inputs[t])] = 1;
 
@@ -206,8 +204,8 @@ private:
 		Mat1d powdparam, sqrtmem;
 		pow(dparam, 2.0, powdparam);
 		(*mem) += powdparam;
-		sqrt((*mem) + 1e-8, sqrtmem);
-		(*param) += -learning_rate * dparam / sqrtmem;	//adagrad update
+		sqrt((*mem) + 1, sqrtmem);
+		(*param) += -(learning_rate * dparam) / sqrtmem;	//adagrad update
 	}
 	vector<uint32_t> sample(Mat1d * h, uint32_t seed_ix, uint32_t n) {
 		//sample a sequence of integers from the model h is memory state, seed_ix is seed letter for first time step
@@ -247,12 +245,8 @@ private:
 		//distribution function of X, evaluated at x, is the probability that X will take a value less than or equal to x.
 		vector<double> accumulatedProb(p.rows + 1);
 		accumulatedProb[0] = p[0][0];
-#pragma omp parallel
-		{
-#pragma omp for schedule(dynamic) ordered
-			for (int i = 1; i < p.rows; i++)
-				accumulatedProb[i] = accumulatedProb[i - 1] + p[i][0];
-		}
+		for (int i = 1; i < p.rows; i++)
+			accumulatedProb[i] = accumulatedProb[i - 1] + p[i][0];
 		random_device rd;		//Will be used to obtain a seed for the random number engine
 		mt19937 gen(rd());		//Standard mersenne_twister_engine seeded with rd()
 		uniform_real_distribution<> dis(0.0, 1.0);
@@ -315,8 +309,8 @@ public:
 			forward(inputs, hprev, &xs, &hs, &ps);
 			paramSet o = backward(xs, hprev, hs, ps, targets);
 			loss = modelLoss(ps, targets);
-			updateModel(get<0>(o), get<1>(o), get<2>(o), get<3>(o), get<4>(o));
-			smooth_loss = smooth_loss * 0.999 + loss * 0.001;
+ 			updateModel(get<0>(o), get<1>(o), get<2>(o), get<3>(o), get<4>(o));
+			smooth_loss = (smooth_loss * 0.999) + (loss * 0.001);
 			hprev = hs.row(seq_length - 1).t();
 
 			//Sample from the model now and then
