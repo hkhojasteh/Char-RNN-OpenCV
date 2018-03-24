@@ -129,6 +129,9 @@ private:
 			}else{
 				val = (Wxh * (*xs).row(t).t()) + (Whh * (*hs).row(t - 1).t()) + bh;
 			}
+
+			//cout << "val:" << sum(val) << endl;
+
 			for (uint32_t i = 0; i < val.rows; i++) {
 				(*hs)[t][i] = tanh(val[i][0]);
 			}
@@ -309,6 +312,10 @@ public:
 			forward(inputs, hprev, &xs, &hs, &ps);
 			paramSet o = backward(xs, hprev, hs, ps, targets);
 			loss = modelLoss(ps, targets);
+
+			//cout << "hs:" << sum(hs) << endl;
+			//cout << "hprev:" << sum(hprev) << endl << endl;
+
  			updateModel(get<0>(o), get<1>(o), get<2>(o), get<3>(o), get<4>(o));
 			smooth_loss = (smooth_loss * 0.999) + (loss * 0.001);
 			hprev = hs.row(seq_length - 1).t();
@@ -326,15 +333,3 @@ public:
 	}
 protected:
 };
-
-uint32_t main() {
-	cv::theRNG().state = time(0);
-	//hyperparameters
-	uint32_t hidden_size = 100;								//size of hidden layer of neurons
-	uint32_t seq_length = 10;								//number of steps to unroll the RNN for
-	double learning_rate = 1e-1;							//Learning rate is 0.1
-
-	reader data = reader("input.txt", seq_length);
-	RNN rnn = RNN(hidden_size, data.vocabularySize(), seq_length, learning_rate);
-	rnn.train(data);
-}
