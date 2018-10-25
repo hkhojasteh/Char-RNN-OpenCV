@@ -1,5 +1,6 @@
 # Char-RNN-OpenCV
-Minimal character-level Vanilla RNN model in OpenCV.
+Minimal character-level Vanilla RNN model in OpenCV. [![HitCount](http://hits.dwyl.io/hkhojasteh/Char-RNN-OpenCV.svg)](https://github.com/hkhojasteh/Char-RNN-OpenCV)
+
 ![Vanilla RNN Model](./model.png)
 
 ## How to Contribute
